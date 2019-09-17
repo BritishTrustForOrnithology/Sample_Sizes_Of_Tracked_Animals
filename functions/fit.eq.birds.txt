@@ -1,0 +1,302 @@
+# ------------------------------------------------------------------------ #
+# fit.eq.birds: fits equations to all boots, plots and outputs results
+# ------------------------------------------------------------------------ #
+
+fit.eq.birds <- function(x){
+
+   print(x)
+   											# data.frame "Use" is the data having been subsetted for the occupancy level we are working with, e.g. 100%
+   use <- Use[Use$day == MaxDay,] 						# select day increment - in this example for 151 days maximum
+   use <- data.frame(area = use[,x], birdNo = 1:length(use[,x]))  # select individual bootstrap, "use" from this point on is now just one boot 
+
+   if(length(unique(use$area)) > 1) {	
+
+	# ===================================================================== #
+	# PART 1 - CURVE FITTING
+	# ===================================================================== #
+	# Complications with how models are fitted and convergence
+	# nls tended to have better overall convergence, drc and nls differed
+	# ever so slightly in the coefficients produced, but deemed negligible (probably to do with different optimisation procedures/maximising likelihood)
+
+	# NA what type of model will be used, then overwritten through the routine
+	typ1 <- typ2 <- typ3 <- typ4 <- typ5 <- typ6 <- NA
+
+	# Set up no-convergence as a null situation, overwritten to converged after running model and seeing if it did converge
+	mod1conv <- mod2conv <- mod3conv <- mod4conv <- mod5conv <- mod6conv <- FALSE
+
+	# --------------------------------- #
+	# MODEL 1 - Michaelis-Menton
+	# --------------------------------- #
+	# generic "err" vector nullified at the start of each model fit
+      err <- substr(as.vector(try(stop(""),TRUE)),1,12); 			# nullify the error before starting
+	m1 <- try(nls(area ~ (a*birdNo)/(b+birdNo), use,start=list(a=6000,b=0.2),na.action=na.omit),silent=TRUE)
+	if(!is.character(m1)){typ1 <- "nls"; mod1conv <- TRUE} 		# if not character vector then this model converged, no need to try drc R package
+	if(substr(m1,1,5)[1] == "Error") { 				 		# if an error was captured then try drc R package
+		m1 <- try(drm(area ~ birdNo, data = use, fct = MM.2(),na.action=na.omit,control = drmc(errorm = FALSE,noMessage=TRUE,maxIt = 500,otrace=TRUE)),silent=TRUE)
+		if(!is.character(m1)){typ1 <- "drm"; mod1conv <- TRUE} 	# if drc package used instead, then remember it for later.
+	} 
+	err <- substr(as.vector(geterrmessage()),1,12) # same as above if no error was returned (although nulified again before each model anyway)
+
+	# --------------------------------- #
+	# MODEL 2 - Two-parameter asymptotic
+	# --------------------------------- #
+      err <- substr(as.vector(try(stop(""),TRUE)),1,12) 
+	m2 <- try(nls(area ~ a*(1-exp(-birdNo/b)), use,start=list(a=2950,b=4.256),na.action=na.omit),silent=TRUE)
+	if(!is.character(m2)){typ2 <- "nls"; mod2conv <- TRUE} 
+	if(substr(m2,1,5)[1] == "Error") {
+		m2 <- try(drm(area ~ birdNo, data = use, fct = AR.2(),control = drmc(errorm = FALSE,noMessage=TRUE,maxIt = 500,otrace=TRUE)),silent=TRUE)
+		if(!is.character(m2)){typ2 <- "drm"; mod2conv <- TRUE}
+	}
+      err <- substr(as.vector(geterrmessage()),1,12)
+
+	# --------------------------------- #
+	# MODEL 3 - Three-parameter asymptotic
+	# --------------------------------- #
+      err <- substr(as.vector(try(stop(""),TRUE)),1,12) 
+	m3 <- try(nls(area ~ a+(b-a)*(1-exp(-birdNo/c)), use,start=list(a=4290,b=8587,c=4.119),na.action=na.omit),silent=TRUE)
+	if(!is.character(m3)){typ3 <- "nls"; mod3conv <- TRUE} 
+	if(substr(m3,1,5)[1] == "Error") {
+		m3 <- try(drm(area ~ birdNo, data = use, fct = AR.3(),na.action=na.omit,control = drmc(errorm = FALSE,noMessage=TRUE,maxIt = 500,otrace=TRUE)),silent=TRUE)
+		if(!is.character(m3)){typ3 <- "drm"; mod3conv <- TRUE}
+	}
+      err<-substr(as.vector(geterrmessage()),1,12)
+
+	# --------------------------------- #
+	# MODEL 4 - Three-parameter logistic
+	# --------------------------------- #
+      err <- substr(as.vector(try(stop(""),TRUE)),1,12) 
+	m4 <- try(nls(area ~ b / (1 + exp(a*(birdNo - c))),	# note, now a is the asymptote 
+		use,start=list(a=-0.5,b=5000,c=3.8),na.action=na.omit),silent = TRUE)
+	if(!is.character(m4)){typ4 <- "nls"; mod4conv <- TRUE}
+	if(substr(m4,1,5)[1] == "Error") {
+		m4 <- try(drm(area ~ birdNo, data = use, fct = L.3(),na.action=na.omit, control = drmc(errorm = FALSE,noMessage=TRUE,maxIt = 500,otrace=TRUE)),silent=TRUE)
+		if(!is.character(m4)){typ4 <- "drm"; mod4conv <- TRUE}
+		}
+
+	# --------------------------------- #
+	# MODEL 5 - Linear
+	# --------------------------------- #
+      err <- substr(as.vector(try(stop(""),TRUE)),1,12)
+	m5 <- try(nls(area ~ a+b*birdNo, use,start=list(a=1,b=1),na.action=na.omit),silent=TRUE)
+	if(!is.character(m5)){typ5 <- "nls"; mod5conv <- TRUE}
+	if(substr(m5,1,5)[1] == "Error") {
+		m5 <- lm(area ~ birdNo, data = use, na.action=na.omit) # trying a linear model rather than drc here
+		if(!is.character(m5)){typ5 <- "lm"; mod5conv <- TRUE}
+		}
+
+	# --------------------------------- #
+	# MODEL 6 - Polynomial
+	# --------------------------------- #
+	m6 <- nls(area ~ a+birdNo-I(birdNo^2), use,start=list(a=1),na.action=na.omit)
+ 	typ6 <- "nls"; mod6conv <- TRUE
+
+	# Whether nls or drm was eventually used
+    	ttyp <- c(typ1,typ2,typ3,typ4,typ5,typ6)
+ 
+	# ---------------------------------- #
+ 	# Check if either of the models under the two R packages actually converged - luckily "summary(model)$coefficients" can be used to extract coefficients from models under both packages
+ 	# Extract the coefficients (and se) from the models - labelled as A, B and C
+	# Note, if no convergence, model is treated as unsuitable for the data
+	# Note also, AIC values are identical under the nls and drc R packages, just the coefficients that differ fractionally
+	# suppressWarnings() used to make for cleaner experience, occassionally standard errors cannot be obtained on coefficients, possibly could be considered as an ill-fitting model
+	# ---------------------------------- #
+ 	if(mod1conv == TRUE){
+		AICm1 <- AIC(m1) 
+		m1A <- suppressWarnings(summary(m1)$coefficients[1])
+		m1B <- suppressWarnings(summary(m1)$coefficients[2])
+		m1Ae <- suppressWarnings(summary(m1)$coefficients[1,2]) 
+		m1Be <- suppressWarnings(summary(m1)$coefficients[2,2])
+	}
+ 	if(mod2conv == TRUE){
+		AICm2 <- AIC(m2) 
+		m2A <- suppressWarnings(summary(m2)$coefficients[1]) 
+		m2B <- suppressWarnings(summary(m2)$coefficients[2])
+		m2Ae <- suppressWarnings(summary(m2)$coefficients[1,2])
+		m2Be <- suppressWarnings(summary(m2)$coefficients[2,2])
+	}
+ 	if(mod3conv == TRUE){
+		AICm3 <- AIC(m3) 
+		m3A <- suppressWarnings(summary(m3)$coefficients[1])
+		m3B <- suppressWarnings(summary(m3)$coefficients[2])
+		m3C <- suppressWarnings(summary(m3)$coefficients[3]) 
+		m3Ae <- suppressWarnings(summary(m3)$coefficients[1,2])
+		m3Be <- suppressWarnings(summary(m3)$coefficients[2,2]) 
+		m3Ce <- suppressWarnings(summary(m3)$coefficients[3,2])
+	}
+ 	if(mod4conv == TRUE){
+		AICm4 <- AIC(m4) 
+		m4A <- as.vector(suppressWarnings(summary(m4)$coefficients[1])) 
+		m4B <- as.vector(suppressWarnings(summary(m4)$coefficients[2]))
+		m4C <- as.vector(suppressWarnings(summary(m4)$coefficients[3]))
+		m4Ae <- as.vector(suppressWarnings(summary(m4)$coefficients[1,2]))
+		m4Be <- as.vector(suppressWarnings(summary(m4)$coefficients[2,2]))
+		m4Ce <- as.vector(suppressWarnings(summary(m4)$coefficients[3,2]))
+	}
+ 	if(mod5conv == TRUE){
+		AICm5 <- AIC(m5) 
+		m5A <- suppressWarnings(summary(m5)$coefficients[1])
+		m5B <- suppressWarnings(summary(m5)$coefficients[2])
+		m5Ae <- suppressWarnings(summary(m5)$coefficients[1,2])
+		m5Be <- suppressWarnings(summary(m5)$coefficients[2,2])
+	}
+ 	if(mod6conv == TRUE){
+		AICm6 <- AIC(m6) 
+		m6A <- suppressWarnings(summary(m6)$coefficients[1])
+		m6Ae <- suppressWarnings(summary(m6)$coefficients[1,2])
+	}
+ 
+	# NA data if model not coverged under either of the packages
+ 	if(mod1conv == FALSE){AICm1 <- NA; m1A <- NA; m1B <- NA; m1Ae <- NA; m1Be <- NA}
+ 	if(mod2conv == FALSE){AICm2 <- NA; m2A <- NA; m2B <- NA; m2Ae <- NA; m2Be <- NA}
+ 	if(mod3conv == FALSE){AICm3 <- NA; m3A <- NA; m3B <- NA; m3C <- NA; m3Ae <- NA; m3Be <- NA; m3Ce <- NA}
+ 	if(mod4conv == FALSE){AICm4 <- NA; m4A <- NA; m4B <- NA; m4C <- NA; m4Ae <- NA; m4Be <- NA; m4Ce <- NA}
+ 	if(mod5conv == FALSE){AICm5 <- NA; m5A <- NA; m5B <- NA; m5Ae <- NA; m5Be <- NA}
+ 	if(mod6conv == FALSE){AICm6 <- NA; m6A <- NA; m6Ae <- NA}
+  	m1C <- NA; m1Ce <- NA; 	m2C <- NA; m2Ce <- NA; 	m5C <- NA; m5Ce <- NA; 	m6C <- NA; m6Ce <- NA; 	m6B <- NA; m6Be <- NA
+ 
+	# data.frame of AIC and all model coefficients (and their error)
+ 	ff <- data.frame(model=1:6,modnam = c("MM","2pAs","3pAs","3pLs","Lin","Pol"),
+   	AIC=c(AICm1,AICm2,AICm3,AICm4,AICm5,AICm6),type = ttyp)
+  	ff$Acoefs <- c(m1A,m2A,m3A,m4A,m5A,m6A)
+ 	ff$Bcoefs <- c(m1B,m2B,m3B,m4B,m5B,m6B)
+ 	ff$Ccoefs <- c(m1C,m2C,m3C,m4C,m5C,m6C)
+  	ff$Aerr <- c(m1Ae,m2Ae,m3Ae,m4Ae,m5Ae,m6Ae)
+ 	ff$Berr <- c(m1Be,m2Be,m3Be,m4Be,m5Be,m6Be)
+ 	ff$Cerr <- c(m1Ce,m2Ce,m3Ce,m4Ce,m5Ce,m6Ce)
+  	ff$boot <- x
+
+	# ===================================================================== #
+	# PART 2 - Using area~bird equations to plot and back-predict number of birds
+	# ===================================================================== #
+	pop <- 640*2 # just estimating for the maximum poulation size
+
+	# ----------------------------------------------------- #
+	# CURVES AND ALL EQUATIONS
+	# ----------------------------------------------------- #
+	# Reminder of the equations
+	# MM 	y = (a*x)/(b+x)
+	# AR2 y = a*(1-exp(-x/b))	
+	# AR3 y = a + (b-a)(1-exp(-x/c))
+	# LS3 y = b / (1 + exp(a * (x - c)))
+	# Lin y = a+bx
+	# Pol y = a+x-I(x^2)
+
+	# Functions to plot/obtain original equations
+	plot.MM <- function(z){(ff2$Acoefs*z) / (ff2$Bcoefs+z)}
+	plot.AR2 <- function(z){ff2$Acoefs*(1-exp(-z/ff2$Bcoefs))}				
+	plot.AR3 <- function(z){ff2$Acoefs + (ff2$Bcoefs-ff2$Acoefs)*(1-exp(-z/ff2$Ccoefs))} 		
+	plot.LS3 <- function(z){ff2$Bcoefs / (1 + exp(ff2$Acoefs * (z - ff2$Ccoefs)))}
+	plot.LIN <- function(z){ff2$Acoefs + ff2$Bcoefs*z }
+	plot.POL <- function(z){ff2$Acoefs + z - I(z^2) }
+
+	# Functions to plot/obtain back-trasnformed equations
+	plot.MM.inv <- function(z){(ff2$Bcoefs*z) / (ff2$Acoefs-z)}
+	plot.AR2.inv <- function(z){ff2$Bcoefs*(log((ff2$Acoefs/(ff2$Acoefs-z))))}	# Inverse
+	plot.AR3.inv <- function(z){ff2$Ccoefs*(log((ff2$Bcoefs-ff2$Acoefs) / (ff2$Bcoefs-z)))} 		# Inverse
+	plot.LS3.inv <- function(z){(log(ff2$Bcoefs/z - 1) + ff2$Acoefs*ff2$Ccoefs) / ff2$Acoefs  }	# Inverse
+	plot.LIN.inv <- function(z){(z-ff2$Acoefs)/ff2$Bcoefs}
+	plot.POL.inv <- function(z){1/2 - sqrt((1/4)+ff2$Acoefs-z)}
+
+	# ----------------------------------------------------- #
+	# Select the best model on AIC and plot it/estimate no. birds
+	# ----------------------------------------------------- #
+	ff$choose <- NA 	# nullify 
+
+	# Check and remove models where parameter etstimates could not be obtained
+	MM <- ff[ff$modnam == "MM",]; MM$kp <- 0
+	TwopAs <- ff[ff$modnam == "2pAs",]; TwopAs$kp <- 0
+	ThreepAs <- ff[ff$modnam == "3pAs",]; ThreepAs$kp <- 0
+	ThreepLs <- ff[ff$modnam == "3pLs",]; ThreepLs$kp <- 0
+	Lin <- ff[ff$modnam == "Lin",]; Lin$kp <- 0
+	Pol <- ff[ff$modnam == "Pol",]; Pol$kp <- 0
+	if(any(c(MM$Aerr,MM$Berr)=="NaN",na.rm=TRUE)){MM$kp <- 1}
+	if(any(c(TwopAs$Aerr,TwopAs$Berr)=="NaN",na.rm=TRUE)){TwopAs$kp <- 1}
+	if(any(c(ThreepAs$Aerr,ThreepAs$Berr,ThreepAs$Cerr)=="NaN",na.rm=TRUE)){ThreepAs$kp <- 1}
+	if(any(c(ThreepLs$Aerr,ThreepLs$Berr,ThreepLs$Cerr)=="NaN",na.rm=TRUE)){ThreepLs$kp <- 1}
+	ff <- rbind(MM,TwopAs,ThreepAs,ThreepLs,Lin,Pol)
+	ff <- ff[ff$kp == 0,]
+
+	# remove any models where AIC could not be obtained - if no coefficients then this step dropped anyway really, so prob not needed	
+	ff <- ff[!is.na(ff$AIC),]
+
+	# select the model with the lowest AIC
+	ff2 <- ff[ff$AIC == min(ff$AIC),]
+
+	# An option here. Sometimes, linear models are selected, but where equal
+	# support (< 2*dAIC) can be shown for an asymptotic model. Linear models
+	# be their definition produce understandably very high predictions when extrapolated.
+	# Therefore, an option here is for linear models to be selected only 
+	# if there is significant support for them.
+	# This is to prioritise asymptotic relationships wherever possible.
+	# Note, of course it is possible to suggest that equal support may be shown for
+	# multiple asymptotic relationships per bootstrap as well, which is an additional complication, 
+	# not included in this routine - one asymp. relationship is chosen per bootstrap. 
+	if(ff2$modnam == "Lin"){
+		ff.check <- ff[ff$modnam != "Lin",]
+		if(min(ff.check$AIC) - ff2$AIC <= 2){
+			ff2 <- ff.check[ff$AIC == min(ff.check$AIC),] # then select the equally best asymptotic model.
+		}
+	}
+
+	# get the right curve functions for the model chosen
+	if(ff2$modnam == "Lin"){Fun <- plot.LIN; Fun.inv <- plot.LIN.inv; plot.col="black"}
+	if(ff2$modnam == "MM"){Fun <- plot.MM; Fun.inv <- plot.MM.inv; plot.col="red"}
+	if(ff2$modnam == "2pAs"){Fun <- plot.AR2; Fun.inv <- plot.AR2.inv; plot.col="orange"}
+	if(ff2$modnam == "3pAs"){Fun <- plot.AR3; Fun.inv <- plot.AR3.inv; plot.col="blue"}
+	if(ff2$modnam == "3pLs"){Fun <- plot.LS3; Fun.inv <- plot.LS3.inv; plot.col="green"}
+	if(ff2$modnam == "Pol"){Fun <- plot.POL; Fun.inv <- plot.POL.inv; plot.col="grey"}
+
+	# For saving all the AIC values and coefficients across models fitted
+	ff[ff$modnam == ff2$modnam,]$choose <- 1 # assign a 1 neext to chosen model for predictions
+
+	# ---------------------------------- #
+	# Plot curve for this boot (if wanted)
+	# ---------------------------------- #
+	testplot <- data.frame(area=unlist(lapply(seq(1,birdno,0.2),Fun)),birdno = seq(1,birdno,0.2))
+	if(Plot == TRUE){
+		if(x == 1){ # first boot initiate the plot
+			plot(testplot$area~testplot$birdno,typ="n",xlab = "No. birds",ylab=paste("Area of",type,"% usage km-sq",sep=" "),ylim = c(0,maxplot))
+			}
+		lines(testplot$area~testplot$birdno,col=plot.col,lwd=0.3)
+	}
+
+	# ---------------------------------- #
+	# Calculate areas
+	# ---------------------------------- #
+	# 95% and 50% of pop area 
+	pop.area <- data.frame(area=unlist(lapply(pop,Fun)),birdno = pop)
+	pop.area90 <- pop.area$area*0.9
+	pop.area95 <- pop.area$area*0.95
+	pop.area50 <- pop.area$area*0.5
+
+	# ---------------------------------- #
+	# Back-predict no. birds for areas
+	# ---------------------------------- #
+	x90 <- data.frame(birdNo=unlist(lapply(pop.area90,Fun.inv)), area = pop.area90, Occ = type, PropAsy = "X90")
+	x95 <- data.frame(birdNo=unlist(lapply(pop.area95,Fun.inv)), area = pop.area95, Occ = type, PropAsy = "X95")
+	x50 <- data.frame(birdNo=unlist(lapply(pop.area50,Fun.inv)), area = pop.area50, Occ = type, PropAsy = "X50")
+	x100 <- data.frame(birdNo = pop.area$birdno,area = pop.area$area, Occ = type, PropAsy = "X100")
+	fin.pred <- rbind(x90,x95,x50,x100)
+	fin.pred$boot <- x 
+	fin.pred$model <- ff2$modnam
+
+	# =================================================================== #
+	# PART 3. OUTPUTS
+	# =================================================================== #
+	# Save both the predictions for this boot and append to all others
+	# To be stored at output working directory of choice
+	fname1 <- paste(type,".",MaxDay,"day.predictions.csv",sep="")
+	fname2 <- paste(type,".",MaxDay,"day.models.csv",sep="")
+
+	if(x == 1){
+		write.table(fin.pred,fname1,col.names=TRUE,row.names=FALSE,sep=",")
+		write.table(ff,fname2,col.names=TRUE,row.names=FALSE,sep=",")
+		}
+	if(x > 1){
+		write.table(fin.pred,fname1,col.names=FALSE,row.names=FALSE,sep=",",append=TRUE)
+		write.table(ff,fname2,col.names=FALSE,row.names=FALSE,sep=",",append=TRUE)
+		}
+
+   } # close if
+
+}

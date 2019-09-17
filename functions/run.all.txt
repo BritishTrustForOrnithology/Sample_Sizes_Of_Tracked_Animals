@@ -1,0 +1,80 @@
+# ********************************************************************** #
+# FUNCTION "runall"
+# Run through individual birds added cumulatively for this starting sample,
+# working out (in vectorised way) the cumulative sum of areas for
+# Occupancies: 50, 75, 90, 95, 98 and 100%
+# ********************************************************************** #
+
+# ------------------------------------------------------------------------- #
+# FUNCTION: run.all. Run through 1 boot, assess occupancy
+# ------------------------------------------------------------------------- #
+
+run.all <- function(x){
+
+  	# Get dataframe subsets repeated for each bird picked, i.e. more than once per sample!
+ 	test <- datasub[order(datasub$NewDay),]
+	tt <- table(x)
+	tt2 <- split(tt,1:length(tt))
+	get.splits <- function(y){
+		rr <- test[test$Bird == names(y),]
+		ss <- do.call("rbind", replicate(y, rr, simplify = FALSE))
+		}
+	test <- do.call("rbind",lapply(tt2,get.splits))	# so each bird is repeated x number of times in the given sample now
+	test2 <- data.table(test)
+
+	aa <- dcast.data.table(test2, Square ~ NewDay, fun= mean, fill = 0, value.var = "Dur.hrs")
+	aa <- as.matrix(aa)
+	sq <- aa[,1]
+	aa <- aa[,-1] # remove the square column (but save for later plotting above)
+
+	# need a workaround if there is ONLY one square - add in fake zero row
+	if(!is.null(dim(aa))){
+	  if(dim(aa)[1] == 1){
+	  	aafake <- aa
+	  	aafake <- rep(0,length(aa))
+	  	aa <- as.matrix(rbind(aa,aafake))
+	  }
+	}
+	if(is.null(dim(aa))){
+	  	aafake <- aa
+	  	aafake <- rep(0,length(aa))
+	  	aa <- as.matrix(rbind(aa,aafake))
+	}
+
+	aa2 <- t(apply(aa, 1, cumsum))
+
+	# then sort by all columns in one go
+	aa3 <- apply(aa2,2,sort,decreasing = TRUE)	# order by Dur.hrs
+
+	# then do cumsum over COLUMNS (for occupancy assessment) - each column here remember is a cumaltive day tally 1, 1-2, 1-3 etc - dataframe is stiall at the square level - dataframe is summed across birds at the start of the run 
+	aa4 <- apply(aa3, 2, cumsum) 	# cumsum columns only 
+	aa4[!aa3>0]<-0	# Add in zeros from aa3 because IT WILL then go over the zeros in aa3 so you DO need to reinsert zeros
+
+	aa5 <- t(t(aa4)/apply(aa4, 2, max))	
+	aa6 <- aa5
+	aa6[!aa6>0]<-NA
+
+	# Calculate occpancy: counts the "TRUEs" where the condition is met for each column (each row being a square) and then multiplying up to get area 
+	aa7 <- aa6
+	fin <- data.frame(X50 = colSums(aa7<=0.5,na.rm=TRUE)) #50% KDE
+	fin$X75 <- colSums(aa7<=0.75,na.rm=TRUE)	#75% KDE
+	fin$X90 <- colSums(aa7<=0.9,na.rm=TRUE)	#90% KDE
+	fin$X95 <- colSums(aa7<=0.95,na.rm=TRUE) 	#95% KDE
+	fin$X98 <- colSums(aa7<=0.98,na.rm=TRUE) 	#98% KDE
+	fin$X100 <- colSums(aa7<=1,na.rm=TRUE) 	#100% KDE
+	fin <- fin*4	# translate to actual area 
+
+	# add in the days
+	fin$Day <- 1:MaxDay
+
+	fin$birds <-  paste(list(x))
+	#fin$birds <-  paste(ls[7])
+	fin$it <- r
+
+ 	# export individual samples
+ 	subDir <- build.dir(no)
+ 	write.loc<-"Sim_X.csv"; 
+ 	write.loc<-gsub("X",r,write.loc)
+ 	write.table(fin,file=write.loc,append=TRUE,row.names=FALSE,col.names=FALSE,sep=",")	
+
+}

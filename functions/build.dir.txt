@@ -1,0 +1,17 @@
+# ------------------------------------------------------------------------- #
+# FUNCTION: build.dir. Create output directory based on chosen no. birds/days
+# ------------------------------------------------------------------------- #
+# Naming here follows the logic implied in programming steps before this point
+# including whether data were:
+# all years or individual years "Allyear",
+# offshore data only "off" = TRUE/FALSE
+# including migration periods as birds were leaving the area after central place foraging ceased - "mig" = TRUE/FALSE
+# random re-ording of the days in the sample to remove potential bias of seasonality, that was tested (see appendices) - random = TRUE/FALSE
+# resampling with replacement - resample = TRUE/FALSE
+
+build.dir <- function(birdno){
+	subDir <- "Sims_BBbirds_DDdays_Allyear_Mar2Aug_offTRUE_migTRUE_randomFALSE_resampleTRUE"
+	subDir <- gsub("BB",birdno,subDir)
+	subDir <- gsub("DD",MaxDay,subDir)
+	subDir
+}
